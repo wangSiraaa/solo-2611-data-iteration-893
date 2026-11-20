@@ -1,0 +1,10 @@
+{
+  "revision": "r1",
+  "profiles": [
+    {
+      "profile_id": "P",
+      "half_width": 1,
+      "half_height": 1
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+{"op": "audit", "pairs": [["A", "B"], ["A", "C"]], "report_id": "R1"}
+{"op": "revise_profiles", "file": "revision.json"}
+{"op": "audit", "pairs": [["A", "C"]], "report_id": "R2"}
+{"op": "read_report", "report_id": "R1"}
