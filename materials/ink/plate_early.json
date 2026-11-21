@@ -1,0 +1,9 @@
+{
+  "plate_id": "early",
+  "cells": [
+    {"cell_id": "c", "x0": 0, "y0": 0, "x1": 1, "y1": 1}
+  ],
+  "ink_rates": {
+    "c": [{"cart_id": "S", "flow_rate": 1}]
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "revision": "ink-r1",
+  "profiles": [
+    {"profile_id": "P", "half_width": "1/2", "half_height": "1/2"}
+  ]
+}

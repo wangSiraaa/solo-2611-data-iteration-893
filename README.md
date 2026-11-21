@@ -27,9 +27,13 @@
 | `cart_audit/service.py` | **独立轮廓服务**：单对线性动作段精确求交，无采样、无浮点 |
 | `cart_audit/library.py` | 共同细分核查、证据保存、批次报告、幂等与失败不发布 |
 | `cart_audit/verifier.py` | 用报告冻结快照独立重算并比对（篡改可检出） |
-| `cart_audit/runner.py` | `operations.jsonl` 操作流（audit / revise_profiles / read_report） |
+| `cart_audit/runner.py` | `operations.jsonl` 操作流（audit / revise_profiles / read_report / ink_voucher / read_voucher / allocate_paper / confirm_paper） |
+| `cart_audit/ink.py` | **格面受墨量**：按格/印模/动作段精确积分出理数凭单，冻结与独立复核 |
+| `cart_audit/paper.py` | **纸张配给**：闭区间门槛、字典序最优分配、原子确认、并发与旧印样 |
 | `demo.py` | materials/728 主场景 + 六类边界场景端到端演示 |
-| `tests/test_contract.py` | 27 个契约级测试（含 20 车 × 100 段规模用例） |
+| `demo_ink.py` | materials/ink 受墨量凭单与纸张配给端到端演示 |
+| `tests/test_contract.py` | 27 个原核查契约级测试（含 20 车 × 100 段规模用例） |
+| `tests/test_ink_paper.py` | 22 个受墨量与纸张配给契约级测试 |
 
 ## 核查方法
 
@@ -61,8 +65,10 @@
 ## 运行
 
 ```bash
-python3 -m unittest tests.test_contract -v   # 27 个测试
-python3 demo.py                               # 端到端演示，生成 cart_audit_demo.sqlite3
+python3 -m unittest tests.test_contract -v       # 27 个原契约测试
+python3 -m unittest tests.test_ink_paper -v      # 22 个受墨量/配给测试
+python3 demo.py                                   # 原端到端演示，生成 cart_audit_demo.sqlite3
+python3 demo_ink.py                               # 受墨量与纸张配给演示（临时库，自动清理）
 ```
 
 主场景（materials/728）手算对应关系：
@@ -82,6 +88,50 @@ python3 demo.py                               # 端到端演示，生成 cart_au
   读取整批车对结论、来源证据并独立复核。
 
 ## 存储
+
+SQLite 表：`profile_revision / profile / horizon / cart / trajectory_knot`
+（目录与轨迹），`report / report_pair / conflict / conflict_evidence /
+audit_attempt`（报告与留痕），`ink_voucher / ink_cell / ink_stamp_cell /
+ink_segment_contrib / ink_attempt`（受墨量凭单），`paper_type /
+paper_confirmation / sample_record`（纸种库存、确认与旧印样）。有理数以
+规范分数字符串 `p/q` 落库，读出还原为 `Fraction`，全程无浮点。
+
+## 格面受墨量与纸样配给（materials/ink）
+
+虚构印模仅作离线数据复核。一张试版由互不相交的轴对齐矩形格组成，每格
+可挂若干只印模及各自恒定的非负流墨率。沿用旧档的分段线性路径与对应
+轮廓半宽/半高，按
+
+    ink(cell) = ∫_horizon Σ_stamp flow_rate · area(stamp(t) ∩ cell) dt
+
+计算。只碰边、只碰角没有面积——与旧核查合同的严格正面积一致。动作段内
+某一方向的交叠长度是分段线性的，折点出现在印模边缘越过格边界处；两个
+方向同时考虑后交叠面积在折点之间是二次多项式，用有理数三点 Simpson
+精确积分，**不采样**。因此斜向平移导致面积在同一动作段内改变也能给出
+精确凭单。
+
+凭单冻结当时的轮廓版本、轨迹快照、格网与流墨率；按格 / 印模 / 有效动作段
+逐层保存精确有理数贡献，`verify_voucher` 可仅凭凭单内容独立重算比对。
+更换格网或更正轮廓不会改变旧凭单；后续修订只影响新凭单。相同长短的两格
+可以因印模摆放不同而有不同墨量。
+
+备忘录手算（`materials/ink`）：单格 `[0,1]×[0,1]`、静止、半尺寸 1/2、
+流墨率 1、时限 4，中心 `(5/4,1/2)` 得 `1`，中心 `(3/4,1/2)` 得 `3`，两次都
+只有一只印模、无重叠；斜向平移 `(1/2,1/2)→(3/2,3/2)` 的凭单为 `1/3`。
+
+纸张管理员独立登记纸种与余张数。每张试版有加急权重；每个指定格在某纸种
+上容许的墨量是**闭区间**，全部指定格合格才能用该纸种出一张。为同时到达的
+一批试版分配纸张时按字典序：获配权重总和最大 → 获配张数最多 → 按试版号
+排序的纸种序列字典序最小（未配排在所有纸种之后）。实现上先做一次带容量
+的二分匹配最小费用流求最优权重/张数，再逐版固定字典序最小的可行纸种。
+确认整批在 `BEGIN IMMEDIATE` 事务里一次扣减，要么全扣要么全不扣；同一
+`confirmation_id` 同计划幂等、异文拒绝。并发争抢最后一张时只有一方成功，
+失败方捕获 `PaperShortage.shortages`（逐纸种请求/可用/缺口），可用新库存
+重算后再确认。旧印样记录固定原用纸与墨量凭单。
+
+示例：薄纸仅收 `[0,2]`、厚纸仅收 `[2,4]`，则墨量 3 的后一版只能用厚纸；
+厚纸被更早的确认领完则该版无法交付。
+
 
 SQLite 表：`profile_revision / profile / horizon / cart / trajectory_knot`
 （目录与轨迹），`report / report_pair / conflict / conflict_evidence /

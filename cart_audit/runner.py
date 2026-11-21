@@ -4,7 +4,12 @@
 
 - ``audit``：按指定轮廓修订对车对列表批次核查并发布报告；
 - ``revise_profiles``：载入轮廓修订文件并冻结到目录（同内容复读、异文拒绝）；
-- ``read_report``：读取已发布报告（旧报告保留其冻结尺寸，不随修订改变）。
+- ``read_report``：读取已发布报告（旧报告保留其冻结尺寸，不随修订改变）；
+- ``ink_voucher``：按格网文件与指定修订计算并冻结受墨量凭单（需要
+  :class:`~cart_audit.ink.InkLedger`）；
+- ``read_voucher``：读取已冻结的受墨量凭单（需要 InkLedger）；
+- ``allocate_paper`` / ``confirm_paper``：为一批试版配给并原子确认纸张
+  （需要 :class:`~cart_audit.paper.PaperStore`）。
 
 运行器只编排，不改变严格接触合同；任何核查失败都由核查库抛错，不产生
 “可通过”外观的报告。
@@ -21,7 +26,13 @@ from .library import AuditLibrary
 from .models import Profile, Trajectory
 from .rational import fraction, rational_json_loads
 
-__all__ = ["OperationRunner", "load_motions", "load_profile_revision"]
+__all__ = [
+    "OperationRunner",
+    "load_motions",
+    "load_profile_revision",
+    "load_plate",
+    "load_plate_specs",
+]
 
 
 def load_profile_revision(path: str | Path) -> Tuple[str, List[Profile]]:
@@ -30,6 +41,26 @@ def load_profile_revision(path: str | Path) -> Tuple[str, List[Profile]]:
         raise InputError(f"轮廓修订文件 {path} 缺少 revision/profiles 字段")
     profiles = [Profile.from_data(item) for item in data["profiles"]]
     return str(data["revision"]), profiles
+
+
+def load_plate(path: str | Path):
+    """载入一张试版格网（含每格印模与流墨率）。"""
+    from .ink import ProofPlate
+
+    data = rational_json_loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise InputError(f"格网文件 {path} 必须是 JSON 对象")
+    return ProofPlate.from_data(data)
+
+
+def load_plate_specs(path: str | Path):
+    """载入一批试版的纸张配给需求。"""
+    from .paper import PlateSpec
+
+    data = rational_json_loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, list):
+        raise InputError(f"配给需求文件 {path} 必须是 JSON 数组")
+    return [PlateSpec.from_data(item) for item in data]
 
 
 def load_motions(path: str | Path) -> Tuple[Tuple[object, object], List[Trajectory]]:
@@ -57,11 +88,15 @@ class OperationRunner:
         store: MotionStore,
         library: AuditLibrary,
         materials_dir: str | Path,
+        ink_ledger=None,
+        paper_store=None,
     ):
         self.catalog = catalog
         self.store = store
         self.library = library
         self.materials_dir = Path(materials_dir)
+        self.ink_ledger = ink_ledger
+        self.paper_store = paper_store
 
     def run_file(self, operations_path: str | Path) -> List[dict]:
         results = []
@@ -94,6 +129,62 @@ class OperationRunner:
         if kind == "read_report":
             report = self.library.read_report(str(op["report_id"]))
             return {"op": "read_report", "report_id": report["report_id"], "result": report}
+        if kind == "ink_voucher":
+            if self.ink_ledger is None:
+                raise InputError("本运行器未配置 InkLedger，无法计算受墨量凭单")
+            from .ink import ProofPlate
+
+            plate = (
+                ProofPlate.from_data(op["plate"])
+                if "plate" in op
+                else load_plate(self.materials_dir / op["plate_file"])
+            )
+            voucher = self.ink_ledger.put_voucher(
+                str(op["voucher_id"]), plate, str(op["revision"])
+            )
+            return {"op": "ink_voucher", "voucher_id": voucher["voucher_id"], "result": voucher}
+        if kind == "read_voucher":
+            if self.ink_ledger is None:
+                raise InputError("本运行器未配置 InkLedger，无法读取受墨量凭单")
+            voucher = self.ink_ledger.read_voucher(str(op["voucher_id"]))
+            return {"op": "read_voucher", "voucher_id": voucher["voucher_id"], "result": voucher}
+        if kind == "allocate_paper":
+            if self.paper_store is None:
+                raise InputError("本运行器未配置 PaperStore，无法配给纸张")
+            specs = (
+                load_plate_specs(self.materials_dir / op["plates_file"])
+                if "plates_file" in op
+                else load_plate_specs(self.materials_dir / "plates.json")
+            )
+            result = self.paper_store.allocate_batch(specs)
+            return {"op": "allocate_paper", "result": result.as_dict()}
+        if kind == "confirm_paper":
+            if self.paper_store is None:
+                raise InputError("本运行器未配置 PaperStore，无法确认纸张")
+            from .paper import AllocationResult
+
+            if "allocation" in op:
+                raw = op["allocation"]
+                result = AllocationResult(
+                    assignments=tuple(
+                        (str(item["plate_id"]), item.get("paper_type_id"))
+                        for item in raw["assignments"]
+                    ),
+                    total_weight=fraction(raw.get("total_weight", 0)),
+                    allocated_count=int(raw.get("allocated_count", 0)),
+                    usage={str(k): int(v) for k, v in raw.get("usage", {}).items()},
+                    remaining={},
+                )
+            else:
+                # 未显式给出计划：用当前库存重算后再确认（并发失败方据此重试）。
+                specs = (
+                    load_plate_specs(self.materials_dir / op["plates_file"])
+                    if "plates_file" in op
+                    else load_plate_specs(self.materials_dir / "plates.json")
+                )
+                result = self.paper_store.allocate_batch(specs)
+            payload = self.paper_store.confirm(str(op["confirmation_id"]), result)
+            return {"op": "confirm_paper", "confirmation_id": payload["confirmation_id"], "result": payload}
         raise InputError(f"未知操作类型: {kind!r}")
 
     def _default_revision(self) -> str:

@@ -13,6 +13,25 @@ from .service import ProfileOverlapService
 from .library import AuditLibrary, AuditRejected, AuditInputError
 from .verifier import verify_report
 from .runner import OperationRunner, load_motions, load_profile_revision
+from .ink import (
+    Cell,
+    InkInputError,
+    InkLedger,
+    InkRejected,
+    ProofPlate,
+    Stamp,
+    area_integral,
+    verify_voucher,
+)
+from .paper import (
+    AllocationInputError,
+    AllocationResult,
+    ConfirmationRejected,
+    PaperShortage,
+    PaperStore,
+    PlateSpec,
+    allocate,
+)
 
 __all__ = [
     "fraction",
@@ -35,4 +54,19 @@ __all__ = [
     "OperationRunner",
     "load_motions",
     "load_profile_revision",
+    "Cell",
+    "Stamp",
+    "ProofPlate",
+    "InkLedger",
+    "InkInputError",
+    "InkRejected",
+    "area_integral",
+    "verify_voucher",
+    "PlateSpec",
+    "AllocationResult",
+    "PaperStore",
+    "PaperShortage",
+    "ConfirmationRejected",
+    "AllocationInputError",
+    "allocate",
 ]

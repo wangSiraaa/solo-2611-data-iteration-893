@@ -1,0 +1,5 @@
+{"op": "revise_profiles", "file": "profiles.json"}
+{"op": "ink_voucher", "voucher_id": "V-early", "revision": "ink-r1", "plate_file": "plate_early.json"}
+{"op": "ink_voucher", "voucher_id": "V-late", "revision": "ink-r1", "plate_file": "plate_late.json"}
+{"op": "ink_voucher", "voucher_id": "V-diag", "revision": "ink-r1", "plate_file": "plate_diag.json"}
+{"op": "read_voucher", "voucher_id": "V-early"}

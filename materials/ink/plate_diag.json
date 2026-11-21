@@ -1,0 +1,9 @@
+{
+  "plate_id": "diag",
+  "cells": [
+    {"cell_id": "c", "x0": 0, "y0": 0, "x1": 1, "y1": 1}
+  ],
+  "ink_rates": {
+    "c": [{"cart_id": "D", "flow_rate": 1}]
+  }
+}

@@ -1,0 +1,8 @@
+[
+  {"plate_id": "early", "weight": 1,
+   "ink_by_cell": {"c": "1"},
+   "limits": {"c": {"thin": [0, 2], "thick": [0, 4]}}},
+  {"plate_id": "late", "weight": 2,
+   "ink_by_cell": {"c": "3"},
+   "limits": {"c": {"thin": [0, 2], "thick": [2, 4]}}}
+]
